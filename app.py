@@ -5,7 +5,7 @@ from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
-import google.generativeai as genai
+from google import genai
 
 app = Flask(__name__)
 
@@ -17,8 +17,8 @@ GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
-genai.configure(api_key=GEMINI_API_KEY)
-ai_model = genai.GenerativeModel('gemini-1.5-flash-latest')
+# สร้าง Client สำหรับ google-genai SDK
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 user_buffers = {}
 user_histories = {}
@@ -45,14 +45,14 @@ SYSTEM_PROMPT = """
 4. เมื่อได้ข้อมูลครบถ้วนทั้ง 8 ข้อแล้ว ให้สรุปออกมาในรูปแบบข้อความ ดังนี้:
 
 📋 **สรุปข้อมูล JOB INFORMATION**
-• **บริษัทลูกค้า:** [company_name]
-• **ชื่องาน:** [job_name]
-• **ผู้รับงาน (Co-ordinator):** [coordinator_name]
-• **ผู้ติดต่อ / เบอร์โทร:** [contact_info]
-• **ประเภทงาน:** [work_type]
-• **รายการและจำนวน:** [items_list]
-• **วันที่กำหนดส่งของ:** [delivery_date]
-• **ราคาที่เสนอ/งบประมาณ:** [estimated_price]
+- **บริษัทลูกค้า:** [company_name]
+- **ชื่องาน:** [job_name]
+- **ผู้รับงาน (Co-ordinator):** [coordinator_name]
+- **ผู้ติดต่อ / เบอร์โทร:** [contact_info]
+- **ประเภทงาน:** [work_type]
+- **รายการและจำนวน:** [items_list]
+- **วันที่กำหนดส่งของ:** [delivery_date]
+- **ราคาที่เสนอ/งบประมาณ:** [estimated_price]
 
 "ตรวจสอบข้อมูลเรียบร้อยแล้ว หากถูกต้องกรุณากดยืนยันได้เลยครับ"
 """
@@ -60,7 +60,11 @@ SYSTEM_PROMPT = """
 def call_gemini_with_retry(messages, retries=3):
     for i in range(retries):
         try:
-            response = ai_model.generate_content(messages)
+            # เรียกใช้โมเดล gemini-3.8-flash ผ่าน SDK ตัวใหม่
+            response = client.models.generate_content(
+                model="gemini-3.8-flash",
+                contents=messages
+            )
             return response.text
         except Exception as e:
             if "503" in str(e) or "UNAVAILABLE" in str(e):
