@@ -1,29 +1,29 @@
 import os
-import traceback
-from flask import Flask, abort, request
+import time
+from threading import Timer
+from flask import Flask, request, abort
+from linebot import LineBotApi, WebhookHandler
+from linebot.exceptions import InvalidSignatureError
+from linebot.models import MessageEvent, TextMessage, TextSendMessage
 from google import genai
-from linebot.v3 import WebhookHandler
-from linebot.v3.exceptions import InvalidSignatureError
-from linebot.v3.messaging import (
-    ApiClient,
-    Configuration,
-    MessagingApi,
-    ReplyMessageRequest,
-    TextMessage,
-)
-from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
 app = Flask(__name__)
 
-# ตั้งค่า LINE และ Gemini SDK จาก Environment Variables
-configuration = Configuration(
-    access_token=os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
-)
-handler = WebhookHandler(os.getenv("LINE_CHANNEL_SECRET"))
+# ดึงค่าจาก Environment Variables ของ Render
+LINE_CHANNEL_ACCESS_TOKEN = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
+LINE_CHANNEL_SECRET = os.environ.get('LINE_CHANNEL_SECRET')
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
-client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
+handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
-# System Prompt
+# สร้าง Client สำหรับ google-genai SDK
+client = genai.Client(api_key=GEMINI_API_KEY)
+
+user_buffers = {}
+user_histories = {}
+
+# ================= System Prompt (Updated) =================
 SYSTEM_PROMPT = """
 คุณคือ "ผู้ช่วยรับข้อมูล JOB INFORMATION ของบริษัท สมาร์ท แอนด์ อีซี่ จำกัด"
 หน้าที่ของคุณคืออ่านข้อความ และช่วยรวบรวมข้อมูลตามหัวข้อต่อไปนี้:
@@ -40,9 +40,9 @@ SYSTEM_PROMPT = """
 [กฎการทำงาน]
 1. อ่านข้อความที่ผู้ใช้พิมพ์มา
 2. ห้ามถามหาข้อมูลข้อ 4 (ผู้ติดต่อ/เบอร์โทร) และข้อ 7 (วันที่กำหนดส่งของ) เด็ดขาด หากผู้ใช้ไม่ได้พิมพ์บอกมาตั้งแต่แรก ให้ถือว่าไม่ต้องถามเพิ่ม
-3. หากรายละเอียดสเปกชิ้นงาน (ข้อ 6) ยังขาดขนาดหรือวัสดุ ให้ถามเจาะจงสั้นๆ ทันที เช่น:
+3. หากรายละเอียดสเปกชิ้นงาน (ข้อ 6) ยังขาดขนาดหรือวัสดุ ให้ถามเจาะจงสั้นๆ ทันที ไม่ต้องพูดเยิ่นเย้อ เช่น:
    - "ขอลายละเอียดงานหน่อยครับว่า ขนาดความกว้าง x ความลึกของร่องลิ่ม (มม.), ขนาดเพลา, วัสดุอะไร และกี่ชิ้นครับ?"
-4. หากข้อมูลสเปกครบถ้วนแล้ว ให้แสดงสรุปในรูปแบบสะอาด คลีน ไม่ใส่เครื่องหมาย * ดังนี้:
+4. หากข้อมูลสเปกครบถ้วนแล้ว ให้แสดงสรุปในรูปแบบสะอาด คลีน ไม่ใช้เครื่องหมาย * ดังนี้:
 
 📋 สรุปข้อมูล JOB INFORMATION
 
@@ -54,62 +54,70 @@ SYSTEM_PROMPT = """
 • รายการและจำนวน: [items_list หรือ - (ไม่ได้ระบุ)]
 • วันที่กำหนดส่งของ: [delivery_date หรือ - (ไม่ได้ระบุ)]
 
-ตรวจสอบข้อมูลเรียบร้อยแล้ว หากถูกต้องกรุณากดยืนยันได้เลยครับ
-"""
+สรุปข้อมูลเท่าที่มีเรียบร้อยแล้วครับ หากต้องการเพิ่มข้อมูลส่วนไหนแจ้งได้เลยครับ
+"""def call_gemini_with_retry(messages, retries=3):
+    for i in range(retries):
+        try:
+            # เรียกใช้โมเดล gemini-3.8-flash ผ่าน SDK ตัวใหม่
+            response = client.models.generate_content(
+                model="gemini-3.8-flash",
+                contents=messages
+            )
+            return response.text
+        except Exception as e:
+            if "503" in str(e) or "UNAVAILABLE" in str(e):
+                time.sleep((2 ** i) + 1)
+            else:
+                raise e
+    return "ขออภัยครับ ขณะนี้ระบบประมวลผลมีผู้ใช้งานจำนวนมาก กรุณาลองใหม่อีกครั้งในอีกสักครู่นะครับ"
 
+def process_buffered_messages(user_id, reply_token):
+    if user_id not in user_buffers:
+        return
 
-@app.route("/callback", methods=["POST"])
+    combined_message = "\n".join(user_buffers[user_id]['messages'])
+    del user_buffers[user_id]
+
+    if user_id not in user_histories:
+        user_histories[user_id] = []
+
+    user_histories[user_id].append(f"User: {combined_message}")
+
+    context_payload = SYSTEM_PROMPT + "\n\n[ประวัติการคุยที่ผ่านมา]\n" + "\n".join(user_histories[user_id][-10:])
+    ai_reply = call_gemini_with_retry(context_payload)
+    user_histories[user_id].append(f"AI: {ai_reply}")
+
+    try:
+        line_bot_api.reply_message(reply_token, TextSendMessage(text=ai_reply))
+    except Exception as e:
+        print(f"Failed to reply LINE message: {e}")
+
+@app.route("/webhook", methods=['POST'])
 def callback():
-  signature = request.headers.get("X-Line-Signature", "")
-  body = request.get_data(as_text=True)
-  app.logger.info("Request body: " + body)
-  try:
-    handler.handle(body, signature)
-  except InvalidSignatureError:
-    app.logger.error("Invalid signature check error.")
-    abort(400)
-  except Exception as e:
-    app.logger.error(f"Error handling webhook: {traceback.format_exc()}")
-  return "OK"
+    signature = request.headers.get('X-Line-Signature', '')
+    body = request.get_data(as_text=True)
+    try:
+        handler.handle(body, signature)
+    except InvalidSignatureError:
+        abort(400)
+    return 'OK'
 
+@handler.add(MessageEvent, message=TextMessage)
+def handle_message(event):
+    user_id = event.source.user_id
+    text_sent = event.message.text
+    reply_token = event.reply_token
 
-# จัดการเฉพาะข้อความตัวอักษร
-@handler.add(MessageEvent, message=TextMessageContent)
-def handle_text_message(event):
-  user_message = event.message.text
-  ai_reply_text = ""
+    if user_id in user_buffers and 'timer' in user_buffers[user_id]:
+        user_buffers[user_id]['timer'].cancel()
 
-  try:
-    # 1. เรียกใช้งาน Gemini AI
-    response = client.models.generate_content(
-        model="gemini-3.8-flash",
-        contents=f"{SYSTEM_PROMPT}\n\nข้อความจากลูกค้า: {user_message}",
-    )
+    if user_id not in user_buffers:
+        user_buffers[user_id] = {'messages': [], 'timer': None}
 
-    if response and response.text:
-      ai_reply_text = response.text
-    else:
-      ai_reply_text = "ไม่สามารถประมวลผลข้อความได้ในขณะนี้ครับ"
-
-  except Exception as e:
-    # พิมพ์รายละเอียด Error ฉบับเต็มลงใน Log บน Render
-    app.logger.error(f"Error calling Gemini API: {traceback.format_exc()}")
-    ai_reply_text = "ระบบ AI ขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้งครับ"
-
-  # 2. ส่งข้อความตอบกลับไปยัง LINE
-  try:
-    with ApiClient(configuration) as api_client:
-      line_bot_api = MessagingApi(api_client)
-      line_bot_api.reply_message(
-          ReplyMessageRequest(
-              reply_token=event.reply_token,
-              messages=[TextMessage(text=ai_reply_text)],
-          )
-      )
-  except Exception as e:
-    # พิมพ์รายละเอียด Error ฝั่ง LINE API ลง Log
-    app.logger.error(f"Error sending LINE Reply: {traceback.format_exc()}")
-
+    user_buffers[user_id]['messages'].append(text_sent)
+    timer = Timer(2.5, process_buffered_messages, args=[user_id, reply_token])
+    user_buffers[user_id]['timer'] = timer
+    timer.start()
 
 if __name__ == "__main__":
-  app.run(port=5000)
+    port = int(os.environ.get("PORT", 5000))
