@@ -10,10 +10,9 @@ from linebot.v3.messaging import (
     ReplyMessageRequest,
     TextMessage,
 )
-from linebot.v3.models import (
-    MessageEvent,
-    TextMessageContent,
-)
+
+# แก้ไขตำแหน่ง import มาจาก linebot.v3.webhooks
+from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
 app = Flask(__name__)
 
@@ -40,7 +39,7 @@ SYSTEM_PROMPT = """
 7. delivery_date: กำหนดส่งงาน (หากไม่ได้ระบุมาตั้งแต่แรก ห้ามถามหา ให้ลงค่าเป็น "- (ไม่ได้ระบุ)")
 
 [กฎการทำงาน]
-1. อ่านข้อมูลที่ผู้ใช้พิมพ์มา
+1. อ่านข้อความที่ผู้ใช้พิมพ์มา
 2. ห้ามถามหาข้อมูลข้อ 4 (ผู้ติดต่อ/เบอร์โทร) และข้อ 7 (วันที่กำหนดส่งของ) เด็ดขาด หากผู้ใช้ไม่ได้พิมพ์บอกมาตั้งแต่แรก ให้ถือว่าไม่ต้องถามเพิ่ม
 3. หากรายละเอียดสเปกชิ้นงาน (ข้อ 6) ยังขาดขนาดหรือวัสดุ ให้ถามเจาะจงสั้นๆ ทันที เช่น:
    - "ขอลายละเอียดงานหน่อยครับว่า ขนาดความกว้าง x ความลึกของร่องลิ่ม (มม.), ขนาดเพลา, วัสดุอะไร และกี่ชิ้นครับ?"
@@ -72,7 +71,7 @@ def callback():
   return "OK"
 
 
-# จัดการเฉพาะข้อความตัวอักษร (ข้อความรูปภาพจะถูกข้ามอัตโนมัติโดยไม่เกิด Error)
+# จัดการเฉพาะข้อความตัวอักษร
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_text_message(event):
   user_message = event.message.text
