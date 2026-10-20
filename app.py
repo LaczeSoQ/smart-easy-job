@@ -46,21 +46,23 @@ SYSTEM_PROMPT = """
 
 📋 สรุปข้อมูล JOB INFORMATION
 
-• บริษัทลูกค้า: [company_name หรือ - (ไม่ได้ระบุ)]
-• ชื่องาน: [job_name หรือ - (ไม่ได้ระบุ)]
-• ผู้รับงาน (Co-ordinator): [coordinator_name หรือ - (ไม่ได้ระบุ)]
-• ผู้ติดต่อ / เบอร์โทร: [contact_info หรือ - (ไม่ได้ระบุ)]
-• ประเภทงาน: [work_type หรือ - (ไม่ได้ระบุ)]
-• รายการและจำนวน: [items_list หรือ - (ไม่ได้ระบุ)]
-• วันที่กำหนดส่งของ: [delivery_date หรือ - (ไม่ได้ระบุ)]
+- บริษัทลูกค้า: [company_name หรือ - (ไม่ได้ระบุ)]
+- ชื่องาน: [job_name หรือ - (ไม่ได้ระบุ)]
+- ผู้รับงาน (Co-ordinator): [coordinator_name หรือ - (ไม่ได้ระบุ)]
+- ผู้ติดต่อ / เบอร์โทร: [contact_info หรือ - (ไม่ได้ระบุ)]
+- ประเภทงาน: [work_type หรือ - (ไม่ได้ระบุ)]
+- รายการและจำนวน: [items_list หรือ - (ไม่ได้ระบุ)]
+- วันที่กำหนดส่งของ: [delivery_date หรือ - (ไม่ได้ระบุ)]
 
 สรุปข้อมูลเท่าที่มีเรียบร้อยแล้วครับ หากต้องการเพิ่มข้อมูลส่วนไหนแจ้งได้เลยครับ
-"""def call_gemini_with_retry(messages, retries=3):
+"""
+
+def call_gemini_with_retry(messages, retries=3):
     for i in range(retries):
         try:
-            # เรียกใช้โมเดล gemini-3.8-flash ผ่าน SDK ตัวใหม่
+            # เรียกใช้โมเดลผ่าน SDK ตัวใหม่
             response = client.models.generate_content(
-                model="gemini-3.8-flash",
+                model="gemini-2.5-flash",  # หรือปรับชื่อรุ่นโมเดลตามที่ใช้งานจริง
                 contents=messages
             )
             return response.text
@@ -121,3 +123,4 @@ def handle_message(event):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
