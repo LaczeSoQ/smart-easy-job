@@ -1,4 +1,5 @@
 import os
+import traceback
 from flask import Flask, abort, request
 from google import genai
 from linebot.v3 import WebhookHandler
@@ -10,8 +11,6 @@ from linebot.v3.messaging import (
     ReplyMessageRequest,
     TextMessage,
 )
-
-# แก้ไขตำแหน่ง import มาจาก linebot.v3.webhooks
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
 app = Flask(__name__)
@@ -61,13 +60,16 @@ SYSTEM_PROMPT = """
 
 @app.route("/callback", methods=["POST"])
 def callback():
-  signature = request.headers["X-Line-Signature"]
+  signature = request.headers.get("X-Line-Signature", "")
   body = request.get_data(as_text=True)
   app.logger.info("Request body: " + body)
   try:
-    handler.handle(body, InvalidSignatureError)
+    handler.handle(body, signature)
   except InvalidSignatureError:
+    app.logger.error("Invalid signature check error.")
     abort(400)
+  except Exception as e:
+    app.logger.error(f"Error handling webhook: {traceback.format_exc()}")
   return "OK"
 
 
@@ -75,24 +77,38 @@ def callback():
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_text_message(event):
   user_message = event.message.text
+  ai_reply_text = ""
 
   try:
+    # 1. เรียกใช้งาน Gemini AI
     response = client.models.generate_content(
         model="gemini-3.8-flash",
         contents=f"{SYSTEM_PROMPT}\n\nข้อความจากลูกค้า: {user_message}",
     )
-    ai_reply_text = response.text
-  except Exception as e:
-    ai_reply_text = "ระบบขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้งครับ"
 
-  with ApiClient(configuration) as api_client:
-    line_bot_api = MessagingApi(api_client)
-    line_bot_api.reply_message_with_http_info(
-        ReplyMessageRequest(
-            reply_token=event.reply_token,
-            messages=[TextMessage(text=ai_reply_text)],
-        )
-    )
+    if response and response.text:
+      ai_reply_text = response.text
+    else:
+      ai_reply_text = "ไม่สามารถประมวลผลข้อความได้ในขณะนี้ครับ"
+
+  except Exception as e:
+    # พิมพ์รายละเอียด Error ฉบับเต็มลงใน Log บน Render
+    app.logger.error(f"Error calling Gemini API: {traceback.format_exc()}")
+    ai_reply_text = "ระบบ AI ขัดข้องชั่วคราว กรุณาลองใหม่อีกครั้งครับ"
+
+  # 2. ส่งข้อความตอบกลับไปยัง LINE
+  try:
+    with ApiClient(configuration) as api_client:
+      line_bot_api = MessagingApi(api_client)
+      line_bot_api.reply_message(
+          ReplyMessageRequest(
+              reply_token=event.reply_token,
+              messages=[TextMessage(text=ai_reply_text)],
+          )
+      )
+  except Exception as e:
+    # พิมพ์รายละเอียด Error ฝั่ง LINE API ลง Log
+    app.logger.error(f"Error sending LINE Reply: {traceback.format_exc()}")
 
 
 if __name__ == "__main__":
