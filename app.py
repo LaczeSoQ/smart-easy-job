@@ -11,7 +11,6 @@ from linebot.v3.messaging import (
     TextMessage,
 )
 from linebot.v3.models import (
-    ImageMessageContent,
     MessageEvent,
     TextMessageContent,
 )
@@ -26,7 +25,7 @@ handler = WebhookHandler(os.getenv("LINE_CHANNEL_SECRET"))
 
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
-# System Prompt: เอา * ออกทั้งหมด และจัดรูปแบบการสรุปให้คลีน ไม่ดูลก
+# System Prompt
 SYSTEM_PROMPT = """
 คุณคือ "ผู้ช่วยรับข้อมูล JOB INFORMATION ของบริษัท สมาร์ท แอนด์ อีซี่ จำกัด"
 หน้าที่ของคุณคืออ่านข้อความ และช่วยรวบรวมข้อมูลตามหัวข้อต่อไปนี้:
@@ -45,7 +44,7 @@ SYSTEM_PROMPT = """
 2. ห้ามถามหาข้อมูลข้อ 4 (ผู้ติดต่อ/เบอร์โทร) และข้อ 7 (วันที่กำหนดส่งของ) เด็ดขาด หากผู้ใช้ไม่ได้พิมพ์บอกมาตั้งแต่แรก ให้ถือว่าไม่ต้องถามเพิ่ม
 3. หากรายละเอียดสเปกชิ้นงาน (ข้อ 6) ยังขาดขนาดหรือวัสดุ ให้ถามเจาะจงสั้นๆ ทันที เช่น:
    - "ขอลายละเอียดงานหน่อยครับว่า ขนาดความกว้าง x ความลึกของร่องลิ่ม (มม.), ขนาดเพลา, วัสดุอะไร และกี่ชิ้นครับ?"
-4. หากข้อมูลสเปกครบถ้วนแล้ว (หรือข้อมูลเพียงพอตามรูปแบบที่ส่งมา) ให้แสดงสรุปในรูปแบบสะอาด คลีน ไม่ใส่เครื่องหมาย * ดังนี้:
+4. หากข้อมูลสเปกครบถ้วนแล้ว ให้แสดงสรุปในรูปแบบสะอาด คลีน ไม่ใส่เครื่องหมาย * ดังนี้:
 
 📋 สรุปข้อมูล JOB INFORMATION
 
@@ -73,14 +72,14 @@ def callback():
   return "OK"
 
 
-# ================= 1. จัดการเฉพาะข้อความตัวอักษร (Text Message) =================
+# จัดการเฉพาะข้อความตัวอักษร (ข้อความรูปภาพจะถูกข้ามอัตโนมัติโดยไม่เกิด Error)
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_text_message(event):
   user_message = event.message.text
 
   try:
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.8-flash",
         contents=f"{SYSTEM_PROMPT}\n\nข้อความจากลูกค้า: {user_message}",
     )
     ai_reply_text = response.text
@@ -95,12 +94,6 @@ def handle_text_message(event):
             messages=[TextMessage(text=ai_reply_text)],
         )
     )
-
-
-# ================= 2. ดักจับเมื่อส่ง "รูปภาพ" (ปล่อยผ่าน ไม่ตอบกลับ) =================
-@handler.add(MessageEvent, message=ImageMessageContent)
-def handle_image_message(event):
-  pass
 
 
 if __name__ == "__main__":
