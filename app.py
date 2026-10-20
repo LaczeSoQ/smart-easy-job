@@ -62,7 +62,7 @@ def call_gemini_with_retry(messages, retries=3):
         try:
             # เรียกใช้โมเดลผ่าน SDK ตัวใหม่
             response = client.models.generate_content(
-                model="gemini-2.5-flash",  # หรือปรับชื่อรุ่นโมเดลตามที่ใช้งานจริง
+                model="gemini-3.8-flash",  # หรือปรับชื่อรุ่นโมเดลตามที่ใช้งานจริง
                 contents=messages
             )
             return response.text
